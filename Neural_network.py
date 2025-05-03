@@ -19,7 +19,7 @@ class Emotion_Classifier(nn.Module):
 #number of neurons in each layer
 input_size = len(features)
 hidden_size = 128
-num_classes = 8
+num_classes = 4
 num_epochs = 30
 
 
