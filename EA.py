@@ -1,90 +1,65 @@
-import random
-import copy
+import torch
+import numpy as np
 
-# Hyperparameters for EA
-population_size = 20
-mutation_rate = 0.1
-num_generations = 30
+# Utility function
+def get_flat_params(model):
+    return torch.cat([param.view(-1) for param in model.parameters()])
 
-input_size = features.shape[1]
-hidden_size = 128
-num_classes = 2  # predicting arousal and valence
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-# Evaluation metric: Mean Squared Error
-loss_fn = nn.MSELoss()
-
-# Create a model and return flattened weights
-def model_to_vector(model):
-    return torch.cat([param.data.view(-1) for param in model.parameters()])
-
-# Apply flattened weights to a model
-def vector_to_model(model, vec):
+def set_flat_params(model, flat_params):
     pointer = 0
     for param in model.parameters():
-        num_param = param.numel()
-        param.data = vec[pointer:pointer+num_param].view(param.size())
-        pointer += num_param
-    return model
+        num_params = param.numel()
+        param.data.copy_(flat_params[pointer:pointer + num_params].view_as(param))
+        pointer += num_params
 
-# Initialize population of random models
-def init_population():
-    population = []
-    for _ in range(population_size):
-        model = Emotion_Classifier(input_size, hidden_size, num_classes).to(device)
-        weights = model_to_vector(model)
-        population.append(weights)
-    return population
-
-# Fitness function: negative loss (since we want to minimize it)
-def fitness_function(weights, x_tensor, y_tensor):
-    model = Emotion_Classifier(input_size, hidden_size, num_classes).to(device)
-    model = vector_to_model(model, weights)
+# Fitness evaluation using cross-entropy loss
+def evaluate(model, X, y, criterion):
     model.eval()
     with torch.no_grad():
-        preds = model(x_tensor)
-        loss = loss_fn(preds, y_tensor)
-    return -loss.item()
+        outputs = model(X)
+        loss = criterion(outputs, y)
+    return loss.item()
 
-# Mutation: add small noise to weights
-def mutate(weights):
-    new_weights = weights.clone()
-    for i in range(len(new_weights)):
-        if random.random() < mutation_rate:
-            new_weights[i] += torch.randn(1).to(device) * 0.1
-    return new_weights
+# Evolutionary Algorithm for optimizing neural network weights
+def evolutionary_algorithm(model, X_train, y_train, criterion,
+                           population_size=30, generations=50,
+                           mutation_rate=0.1, elite_fraction=0.2):
 
-# Crossover: average weights of two parents
-def crossover(w1, w2):
-    return (w1 + w2) / 2.0
+    param_size = get_flat_params(model).shape[0]
+    population = [torch.randn(param_size) for _ in range(population_size)]
 
-# Evolutionary optimization loop
-x_tensor = torch.tensor(features, dtype=torch.float32).to(device)
-y_tensor = torch.tensor(labels, dtype=torch.float32).to(device)
+    elite_count = max(1, int(elite_fraction * population_size))
 
-population = init_population()
+    for generation in range(generations):
+        fitness_scores = []
+        for individual in population:
+            set_flat_params(model, individual)
+            fitness = evaluate(model, X_train, y_train, criterion)
+            fitness_scores.append((fitness, individual))
 
-for gen in range(num_generations):
-    fitness_scores = [fitness_function(w, x_tensor, y_tensor) for w in population]
-    sorted_pop = [w for _, w in sorted(zip(fitness_scores, population), key=lambda x: x[0], reverse=True)]
+        # Sort by fitness (lower is better)
+        fitness_scores.sort(key=lambda x: x[0])
+        best_individuals = [ind for _, ind in fitness_scores[:elite_count]]
 
-    print(f"Generation {gen}, Best Fitness: {max(fitness_scores):.4f}")
+        new_population = best_individuals.copy()
+        while len(new_population) < population_size:
+            parent1, parent2 = np.random.choice(best_individuals, 2, replace=False)
+            alpha = torch.rand(1).item()
+            child = alpha * parent1 + (1 - alpha) * parent2
 
-    # Selection: top 20%
-    top_k = int(population_size * 0.2)
-    new_population = sorted_pop[:top_k]
+            # Mutation
+            if np.random.rand() < mutation_rate:
+                child += torch.randn(param_size) * 0.05
 
-    # Reproduction: fill rest with crossover + mutation
-    while len(new_population) < population_size:
-        parent1, parent2 = random.sample(new_population[:top_k], 2)
-        child = mutate(crossover(parent1, parent2))
-        new_population.append(child)
+            new_population.append(child)
 
-    population = new_population
+        population = new_population
 
-# Get best weights and evaluate final model
-best_weights = population[0]
-best_model = Emotion_Classifier(input_size, hidden_size, num_classes).to(device)
-best_model = vector_to_model(best_model, best_weights)
+        if generation % 10 == 0:
+            print(f"Generation {generation}, Best Loss: {fitness_scores[0][0]:.4f}")
 
-# Save or use best_model for prediction
+    # Set model to best individual
+    best_params = fitness_scores[0][1]
+    set_flat_params(model, best_params)
+
+    return model
