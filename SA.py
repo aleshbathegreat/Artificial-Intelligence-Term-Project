@@ -3,7 +3,6 @@ import torch.nn as nn
 import numpy as np
 import random
 
-# Sample input data (you must define this with real features)
 X = torch.tensor(features.values, dtype=torch.float32)
 y = torch.tensor(merged['mean_arousal'].values, dtype=torch.float32).view(-1, 1)  # assuming regression
 
