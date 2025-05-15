@@ -1,0 +1,179 @@
+from math import inf
+from google.colab import files
+files.upload()
+
+
+import numpy as np
+import pandas as pd
+import random
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import TensorDataset, DataLoader
+import matplotlib.pyplot as plt
+
+#DATASPLIT
+dataset = pd.read_csv("mfcc.csv")
+print(dataset.shape)
+
+X = dataset.drop(columns=['songid', 'valence_mean', 'arousal_mean']).values
+
+y_val = dataset['valence_mean'].values
+y_ars = dataset['arousal_mean'].values
+
+X = np.array(X, dtype = np.float32)
+y_val = np.array(y_val, dtype=np.float32)
+y_ars = np.array(y_ars, dtype=np.float32)
+
+def split_data(X, y_val, y_ars, test_ratio=0.2, seed=42):
+    total_samples = len(X)
+    indices = list(range(total_samples))
+    random.seed(seed)
+    random.shuffle(indices)
+
+    split = int(total_samples * (1 - test_ratio))
+    train_idx, test_idx = indices[:split], indices[split:]
+
+    return (
+        X[train_idx], X[test_idx],
+        y_val[train_idx], y_val[test_idx],
+        y_ars[train_idx], y_ars[test_idx]
+    )
+
+class EmotionClassifier(nn.Module):
+    def __init__(self, input_size, hidden_size=128):
+        super(EmotionClassifier, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, 2)
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+X_train, X_test, y_val_train, y_val_test, y_ars_train, y_ars_test = split_data(X, y_val, y_ars)
+
+#stacking both valence and arousal to put into EA
+y_train_tensor = torch.tensor(np.column_stack([y_val_train, y_ars_train]), dtype=torch.float32)
+X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
+
+model = EmotionClassifier(input_size=X.shape[1])
+criterion = nn.MSELoss()
+#EA OPTIMIZER WITH FUNCTIONS
+#model data to suitable vector for EA
+def get_flat_params(model):
+    return torch.cat([param.view(-1) for param in model.parameters()])
+#vector to model data for model
+def set_flat_params(model, flat_params):
+    pointer = 0
+    for param in model.parameters():
+        num_params = param.numel()
+        param.data.copy_(flat_params[pointer:pointer + num_params].view_as(param))
+        pointer += num_params
+
+# Fitness evaluation using cross-entropy loss
+def evaluate(model, X, y, criterion):
+    model.eval()
+    with torch.no_grad():
+        outputs = model(X)
+        loss = criterion(outputs, y)
+    return loss.item()
+
+#adding a mutation rate increase trigger if no change for over 100 gens
+def mutupdate(mutation_rate, mutation_intensity):
+  mutation_rate += 0.1
+  mutation_intensity += 0.05
+
+  return mutation_rate, mutation_intensity
+
+# Evolutionary Algorithm for optimizing neural network weights
+def evolutionary_algorithm(model, X_train, y_train, criterion,
+                           population_size=30, generations=500,
+                           mutation_rate=0.35, truncation_fraction=0.2, mut_int = 0.05):
+
+    param_size = get_flat_params(model).shape[0]
+    population = [torch.randn(param_size)*0.1 for _ in range(population_size)] #randomising to a lower value
+    #using truncation
+    elite_count = max(1, int(truncation_fraction * population_size)) #let weaker ones thrive
+    losses = []
+    best_loss = float('inf')
+    trigger = 0
+    #50 generations for test
+    for generation in range(generations):
+        fitness_scores = []
+        for individual in population:
+            set_flat_params(model, individual)
+            fitness = evaluate(model, X_train, y_train, criterion)
+            fitness_scores.append((fitness, individual))
+
+        # Sort by fitness (lower is better)
+        fitness_scores.sort(key=lambda x: x[0])
+        best_individuals = [ind for _, ind in fitness_scores[:elite_count]]
+
+        
+        if generation > 0 and generation%250 == 0 or generation%400 == 0:
+          print("Randomised Triggered")
+          new_population = best_individuals[:elite_count] + [torch.randn(param_size) for _ in range(population_size - elite_count)]
+        else:
+            new_population = best_individuals.copy()
+        while len(new_population) < population_size:
+            parent1, parent2 = random.sample(best_individuals, 2)
+            alpha = torch.rand(1).item()
+            child = alpha * parent1 + (1 - alpha) * parent2
+
+            #mutation
+            if np.random.rand() < mutation_rate:
+                child += torch.randn(param_size) * mut_int
+
+            new_population.append(child)
+
+        population = new_population
+
+        if generation % 10 == 0:
+            print(f"Generation {generation}, Best Loss: {fitness_scores[0][0]:.4f}")
+            losses.append(fitness_scores[0][0])
+            # if float(fitness_scores[0][0]) < best_loss:
+            #   trigger = 0
+            #   best_loss = fitness_scores[0][0]
+            
+            # else:
+            #   trigger += 1
+            # if trigger > 10:
+            #   mutation_rate, mut_int = mutupdate(mutation_rate, mut_int)
+
+    # Set model to best individual
+    best_params = fitness_scores[0][1]
+    set_flat_params(model, best_params)
+
+    return model, losses
+
+#actual FNN with EA
+optimized_model, losses = evolutionary_algorithm(model, X_train_tensor, y_train_tensor, criterion)
+
+model.eval()
+X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
+finalpredictions = optimized_model(X_test_tensor).detach().numpy()
+
+results = pd.DataFrame({
+    "val_pred": finalpredictions[:, 0],
+    "ars_pred": finalpredictions[:, 1],
+    "val_actual": y_val_test,
+    "ars_actual": y_ars_test
+})
+
+results.to_csv("Predictions_MFCC_EA.csv", index = False)
+torch.save(model.state_dict(), 'emotion_model_weights_EA.pth') #saving model for use
+
+plt.figure(figsize = (5, 4))
+plt.xlabel('Generations')
+plt.ylabel('Loss')
+plt.plot(range(len(losses)), losses, color = 'blue')
+plt.legend()
+plt.title('Training Loss/Gens In Evolutionary Algorithm')
+plt.grid(True)
+plt.show()
+
+from google.colab import files
+files.download("Predictions_MFCC_EA.csv")
+files.download("emotion_model_weights_EA.pth")
