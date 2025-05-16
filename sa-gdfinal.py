@@ -1,0 +1,171 @@
+from math import inf
+import numpy as np
+import pandas as pd
+import random
+import torch
+import torch.nn as nn
+import matplotlib.pyplot as plt
+from google.colab import files
+
+# --- Upload and Load Data ---
+uploaded = files.upload()
+dataset = pd.read_csv("mfccchroma.csv")
+print("Dataset shape:", dataset.shape)
+
+# --- Preprocess ---
+X = dataset.drop(columns=['songid', 'valence_mean', 'arousal_mean']).values.astype(np.float32)
+y_val = dataset['valence_mean'].values.astype(np.float32)
+y_ars = dataset['arousal_mean'].values.astype(np.float32)
+
+def split_data(X, y_val, y_ars, test_ratio=0.2, seed=42):
+    total_samples = len(X)
+    indices = list(range(total_samples))
+    random.seed(seed)
+    random.shuffle(indices)
+    split = int(total_samples * (1 - test_ratio))
+    train_idx, test_idx = indices[:split], indices[split:]
+    return (
+        X[train_idx], X[test_idx],
+        y_val[train_idx], y_val[test_idx],
+        y_ars[train_idx], y_ars[test_idx]
+    )
+
+# --- Model Definition ---
+class EmotionClassifier(nn.Module):
+    def __init__(self, input_size, hidden_size=128):
+        super(EmotionClassifier, self).__init__()
+        self.model = nn.Sequential(
+            nn.Linear(input_size, hidden_size),
+            nn.ReLU(),
+            nn.Linear(hidden_size, 2)  # 2 outputs: valence and arousal
+        )
+
+    def forward(self, x):
+        return self.model(x)
+
+# Utility Functions
+
+def get_flat_params(model):
+    return torch.cat([param.view(-1) for param in model.parameters()])
+
+def set_flat_params(model, flat_params):
+    pointer = 0
+    for param in model.parameters():
+        num_params = param.numel()
+        param.data.copy_(flat_params[pointer:pointer + num_params].view_as(param))
+        pointer += num_params
+
+def evaluate(model, X, y, criterion):
+    model.eval()
+    with torch.no_grad():
+        outputs = model(X)
+        loss = criterion(outputs, y)
+    return loss.item()
+
+def simulated_annealing_with_gd(model, X_train, y_train, criterion,
+                                T_init=1.0, T_min=1e-5, alpha=0.95,
+                                max_iter=5000, gd_steps=5, lr=0.1,
+                                metropolis_length=20):
+    # Flattened initial weights
+    current_params = get_flat_params(model)
+    best_params = current_params.clone()
+
+    # Evaluate starting loss
+    current_loss = evaluate(model, X_train, y_train, criterion)
+    best_loss = current_loss
+    T = T_init
+    losses = []
+
+    for i in range(max_iter):
+        for _ in range(metropolis_length):
+            # Perturb weights based on current temperature
+            perturb = torch.randn_like(current_params) * (0.1 * T)
+            new_params = current_params + perturb
+
+            # Apply new weights
+            set_flat_params(model, new_params)
+            new_loss = evaluate(model, X_train, y_train, criterion)
+            delta = new_loss - current_loss
+
+            # Metropolis criterion
+            if delta < 0 or np.random.rand() < np.exp(-delta / T):
+                current_params = new_params
+                current_loss = new_loss
+
+                # ----- Gradient Descent Refinement -----
+                optimizer = torch.optim.SGD(model.parameters(), lr=lr)
+                for _ in range(gd_steps):
+                    optimizer.zero_grad()
+                    output = model(X_train)
+                    loss = criterion(output, y_train)
+                    loss.backward()
+                    optimizer.step()
+
+                # Update current parameters after GD
+                current_params = get_flat_params(model)
+                current_loss = evaluate(model, X_train, y_train, criterion)
+
+                # Track best
+                if current_loss < best_loss:
+                    best_loss = current_loss
+                    best_params = current_params.clone()
+            else:
+                # Revert to previous parameters
+                set_flat_params(model, current_params)
+
+        losses.append(current_loss)
+        T *= alpha
+
+        if T < T_min:
+            break
+
+        if i % 50 == 0:
+            print(f"Iter {i}, Temp: {T:.5f}, Loss: {current_loss:.5f}, Best: {best_loss:.5f}")
+
+    # Restore best found weights
+    set_flat_params(model, best_params)
+    return model, losses
+
+
+
+X_train, X_test, y_val_train, y_val_test, y_ars_train, y_ars_test = split_data(X, y_val, y_ars)
+X_train_tensor = torch.tensor(X_train, dtype=torch.float32)
+y_train_tensor = torch.tensor(np.column_stack([y_val_train, y_ars_train]), dtype=torch.float32)
+
+model = EmotionClassifier(input_size=X.shape[1])
+criterion = nn.MSELoss()
+
+model, losses = simulated_annealing_with_gd(
+    model, X_train_tensor, y_train_tensor, criterion,
+    T_init=1.0, T_min=1e-5, alpha=0.95,
+    max_iter=1000, gd_steps=5, lr=0.01, metropolis_length=20
+)
+
+
+
+plt.plot(losses)
+plt.title("Training Loss (SA + GD)")
+plt.xlabel("Iteration")
+plt.ylabel("Loss")
+plt.grid(True)
+plt.show()
+
+
+
+torch.save(model.state_dict(), "emotion_model_weights_SA.pth")
+
+
+model.eval()
+X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
+with torch.no_grad():
+    predictions = model(X_test_tensor).numpy()
+
+df_preds = pd.DataFrame(predictions, columns=["valence_pred", "arousal_pred"])
+df_preds["valence_actual"] = y_val_test
+df_preds["arousal_actual"] = y_ars_test
+df_preds.to_csv("Predictions_MFCCCHROMA_SA.csv", index=False)
+
+files.download("Predictions_MFCCCHROMA_SA.csv")
+files.download("emotion_model_weights_SA.pth")
+
+
