@@ -168,7 +168,7 @@ torch.save(model.state_dict(), 'emotion_model_weights_EA.pth') #saving model for
 plt.figure(figsize = (5, 4))
 plt.xlabel('Generations')
 plt.ylabel('Loss')
-plt.plot(range(len(losses)), losses, color = 'blue')
+plt.plot(range(len(losses)), losses, color = 'blue', label='Training Loss')
 plt.legend()
 plt.title('Training Loss/Gens In Evolutionary Algorithm')
 plt.grid(True)
