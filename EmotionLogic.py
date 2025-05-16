@@ -1,4 +1,4 @@
-#assuming valence and arousal values come out of neural
+#assuming valence and arousal values
 #remember to cite simpful
 from simpful import *
 
@@ -16,7 +16,7 @@ class EmotionLogic:
         fuzz.set_crisp_output_value("sad", 1)
         fuzz.set_crisp_output_value("bored", 2)
         fuzz.set_crisp_output_value("angry", 3)
-        fuzz.set_crisp_output_value("sleepy", 4)
+        fuzz.set_crisp_output_value("drowsy", 4)
         fuzz.set_crisp_output_value("calm", 5)
         fuzz.set_crisp_output_value("excited", 6)
         fuzz.set_crisp_output_value("relaxed", 7)
@@ -27,7 +27,7 @@ class EmotionLogic:
             "IF (valence IS negative) AND (arousal IS calm) THEN (emotion IS sad)",
             "IF (valence IS negative) AND (arousal IS neutral) THEN (emotion IS bored)",
             "IF (valence IS negative) AND (arousal IS excited) THEN (emotion IS angry)",
-            "IF (valence IS neutral) AND (arousal IS calm) THEN (emotion IS bored)",
+            "IF (valence IS neutral) AND (arousal IS calm) THEN (emotion IS drowsy)",
             "IF (valence IS neutral) AND (arousal IS neutral) THEN (emotion IS calm)",
             "IF (valence IS neutral) AND (arousal IS excited) THEN (emotion IS excited)",
             "IF (valence IS positive) AND (arousal IS calm) THEN (emotion IS relaxed)",
@@ -44,15 +44,15 @@ class EmotionLogic:
         
 
         emotion_map = {
-                    1 : 'sad',
-                    2 : 'bored',
-                    3 :  'angry',
-                    4 :  'bored',
-                    5 :  'calm',
-                    6 :  'excited',
-                    7 : 'relaxed',
-                    8 : 'pleasant',
-                    9 : 'happy'
+                    1 : 'SAD',
+                    2 : 'BORED',
+                    3 :  'ANGRY',
+                    4 :  'DROWSY',
+                    5 :  'CALM',
+                    6 :  'EXCITED',
+                    7 : 'RELAXED',
+                    8 : 'PLEASANT',
+                    9 : 'HAPPY'
         }
         
         return emotion_map[int(emo_val)]
