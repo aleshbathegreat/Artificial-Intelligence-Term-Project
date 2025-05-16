@@ -1,5 +1,0 @@
-def basic_error_function(pred_arousal, pred_variance, true_arousal, true_variance):
-    arousal_error = (pred_arousal - true_arousal) ** 2
-    variance_error = (pred_variance - true_variance) ** 2
-    total_error = (arousal_error + variance_error) / 2  # Average of the two
-    return total_error
