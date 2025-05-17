@@ -10,13 +10,12 @@ import torch.optim as optim
 from torch.utils.data import TensorDataset, DataLoader
 from simpful import *
 
-
 csv_path = '/kaggle/input/deap-data/Deap-data/static_annotations_averaged_songs_1_2000.csv'
 dataset_path = '/kaggle/input/deap-data/Deap-data/MEMD_audio'
 
-# Clean and re-save CSV
+#clean and re-save CSV
 df = pd.read_csv(csv_path)
-df.columns = [col.strip() for col in df.columns]  # Remove column name spaces difference in names was causing issues 
+df.columns = [col.strip() for col in df.columns]  #remove column name spaces difference in names was causing issues 
 cleaned_csv_path = 'cleaned_file.csv'
 df.to_csv(cleaned_csv_path, index=False)
 """"
@@ -33,8 +32,8 @@ SUMMARY:
 # Feature Extraction 
 def load_audio(file_path):
     try:
-        y, sr = librosa.load(file_path, sr=None, duration=50)  # had to cut down length of audio to 30
-        return y, sr
+        y, sr = librosa.load(file_path, sr=None, duration=50)  #had to cut down length of audio to 30
+        return y,sr
     except Exception as e:
         print(f"Error loading {file_path}: {e}")
         return None, None
@@ -42,7 +41,7 @@ def load_audio(file_path):
 def features_standardize(features):
     mean = np.mean(features, axis=0)
     std = np.std(features, axis=0) + 1e-9
-    return (features - mean) / std
+    return (features - mean)/ std
 
 def features_extract(feature_matrix):
     features = np.concatenate([
@@ -51,7 +50,7 @@ def features_extract(feature_matrix):
         skew(feature_matrix, axis=0),
         kurtosis(feature_matrix, axis=0)
     ])
-    # Replace NaNs and Infs with 0
+    #replace NaNs and Infs with 0
     return np.nan_to_num(features, nan=0.0, posinf=0.0, neginf=0.0)
 
 
@@ -59,7 +58,6 @@ def chroma_mfcc(y, sr):
     chroma = librosa.feature.chroma_stft(y=y, sr=sr).T
     mfcc = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13).T
     
-
     chroma_std = features_standardize(chroma)
     
     mfcc_std = features_standardize(mfcc)
@@ -83,7 +81,7 @@ def process_dataset(audio_dir, csv_path, max_files=200):
             except ValueError:
                 print(f"Skipping invalid row: {row}")
 
-    X, y_valence, y_arousal = [], [], []
+    X,y_valence,y_arousal = [], [], []
     files_processed = 0
 
     for file in os.listdir(audio_dir):
@@ -127,7 +125,7 @@ def process_dataset(audio_dir, csv_path, max_files=200):
 
     return np.array(X), np.array(y_valence), np.array(y_arousal)
 
-# Data Split 
+#data Split 
 def split_data(X, y_val, y_ars, test_ratio=0.2, seed=42):
     total_samples = len(X)
     indices = list(range(total_samples))
@@ -143,7 +141,6 @@ def split_data(X, y_val, y_ars, test_ratio=0.2, seed=42):
         y_ars[train_idx], y_ars[test_idx]
     )
 
-# --- Neural Network ---
 class EmotionClassifier(nn.Module):
     def __init__(self, input_size, hidden_size=128):
         super(EmotionClassifier, self).__init__()
@@ -189,11 +186,9 @@ class EmotionLogic:
         self.fuzz.set_variable("arousal", ars)
         return self.emotion_map[int(self.fuzz.Sugeno_inference()["emotion"])]
 
-# Main Execution 
 X, y_valence, y_arousal = process_dataset(dataset_path, cleaned_csv_path, max_files=50)
 X_train, X_test, y_val_train, y_val_test, y_ars_train, y_ars_test = split_data(X, y_valence, y_arousal)
 
-# Train
 model = EmotionClassifier(input_size=X.shape[1])
 criterion = nn.MSELoss()
 optimizer = optim.SGD(model.parameters(), lr=0.01)
@@ -214,7 +209,7 @@ for epoch in range(30):
         total_loss += loss.item()
     print(f"Epoch {epoch+1}/30, Loss: {total_loss/len(train_loader):.4f}")
 
-# Test & Emotion Inference
+#test & Emotion Inference
 model.eval()
 X_test_tensor = torch.tensor(X_test, dtype=torch.float32)
 predictions = model(X_test_tensor).detach().numpy()
@@ -227,7 +222,7 @@ for i in range(min(10, len(predictions))):
     emotion = fuzzy_logic.fuzzy(ars_pred, val_pred)
     print(f"Valence: {val_pred:.2f}, Arousal: {ars_pred:.2f} -> Emotion: {emotion}")
 
-print("\n--- Test Results (Sampled) ---")
+print("\n Test Results (Sampled) ")
 for i in range(min(10, len(predictions))):
     pred_val, pred_ars = predictions[i]
     actual_val, actual_ars = y_val_test[i], y_ars_test[i]
