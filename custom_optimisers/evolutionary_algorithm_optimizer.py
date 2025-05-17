@@ -37,7 +37,7 @@ def evolutionary_algorithm(model,X_train,y_train,criterion,
             fitness = evaluate(model,X_train,y_train,criterion)
             fitness_scores.append((fitness,individual))
 
-        #sort by fitness (lower is better)
+        #sort in increasing order
         fitness_scores.sort(key=lambda x: x[0])
         best_individuals = [ind for _, ind in fitness_scores[:truncation_count]]
 
@@ -55,7 +55,6 @@ def evolutionary_algorithm(model,X_train,y_train,criterion,
         if generation % 10== 0:
             print(f"Generation {generation},Best Loss: {fitness_scores[0][0]:.4f}")
 
-    #set model to best individual
     best_params = fitness_scores[0][1]
     set_flat_params(model,best_params)
 
